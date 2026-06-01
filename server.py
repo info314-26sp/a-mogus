@@ -99,7 +99,12 @@ def handle_client(conn, addr):
     print(f"[server] All players confirmed. Game ready!")
 
     # TODO: start game loop (how tf...)
-
+        # in game loop: 
+            # define/release the game state to players
+            # start round
+            # round_end?
+            # round_result - send MSG with what eveyrone did
+            
 
 def main():
     server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

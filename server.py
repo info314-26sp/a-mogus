@@ -146,11 +146,15 @@ def game_loop():
         for color, p in snapshot.items():
             room = p["room"]
             options = ",".join(MAP[room])
-            msg = f"STATE color={color} room={room} options for move={options} round={round_num}\n"
-            p["conn"].sendall(msg.encode())
+            msg = f"STATE color={color} room={room} options={options} round={round_num}\n"
+            try:
+                p["conn"].sendall(msg.encode())
+            except Exception as e:
+                print(f"[server] {color} disconnected during state send: {e}")
 
         # collect one action from each player (blocking)
         actions = {}
+        dead = []
         for color, p in snapshot.items():
             try:
                 data = p["conn"].recv(1024).decode().strip()
@@ -158,7 +162,14 @@ def game_loop():
                 print(f"[server] {color}: {data}")
             except Exception as e:
                 print(f"[server] lost {color}: {e}")
-                actions[color] = "WAIT"
+                dead.append(color)
+
+        with players_lock:
+            for color in dead:
+                players.pop(color, None)
+
+        # only process actions for still-connected players
+        actions = {c: a for c, a in actions.items() if c not in dead}
 
         # resolve
         events = []
@@ -179,15 +190,22 @@ def game_loop():
         # broadcast results
         events_str = ";".join(events)
         result_msg = f"ROUND_RESULT round={round_num} events={events_str}\n"
-        with players_lock:
-            for p in players.values():
+        dead = []
+        for color, p in snapshot.items():
+            try:
                 p["conn"].sendall(result_msg.encode())
+            except Exception as e:
+                print(f"[server] {color} disconnected during result: {e}")
+                dead.append(color)
+
+        with players_lock:
+            for color in dead:
+                players.pop(color, None)
 
         print(f"[server] Round {round_num} done: {events_str}")
+        time.sleep(60)  # wait 10 seconds before next round
         round_num += 1
 
-
-            
 
 def main():
     game_thread = threading.Thread(target=game_loop, daemon=True)

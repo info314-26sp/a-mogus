@@ -1,6 +1,8 @@
+import os
 import socket
 import subprocess
 import sys
+import time
 
 def main():
     # had to look this up and use a bit of ai cause i didnt know how to make host using host IP
@@ -59,17 +61,20 @@ def main():
     # await game start message
     data = sock.recv(1024).decode().strip()
     print(f"[launcher] Received: {data}")
+    data = sock.recv(1024).decode().strip()
+    print(f"\n{data}\n")
 
-    sock.close()
+    #removed and replaced with os.execvp which just transfers the connection over to the client
+    # sock.close()
 
     # launch the client scripts
     # pass color and role as commandline args so the client knows who it is
     if role == "imposter":
         print("[launcher] Launching imposter client...")
-        subprocess.run([sys.executable, "client.py", color, role])
+        os.execvp(sys.executable, [sys.executable, "client.py", color, role])
     else:
         print("[launcher] Launching crewmate client...")
-        subprocess.run([sys.executable, "client.py", color, role])
+        os.execvp(sys.executable, [sys.executable, "client.py", color, role])
 
 
 if __name__ == "__main__":

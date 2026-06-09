@@ -2,6 +2,7 @@ import socket
 import threading
 import random
 import time
+from collections import Counter
 
 # AI assitance used for the IP config thing so host just has to copy paste the IP instead of looking it up themselves
 hostname = socket.gethostname()
@@ -21,6 +22,10 @@ game_ready = threading.Event()
 COLORS = ["red", "blue", "green", "yellow", "purple", "orange"]
 
 '''
+EDIT: updated to make it so that its more branching and allows 
+for the new game to be played well, disregard below comment
+
+
 this is the current map layout bc i say so
 
 cafeteria ── hallway ── reactor
@@ -28,11 +33,15 @@ cafeteria ── hallway ── reactor
              medbay ── electrical
 '''
 MAP = {
-    "cafeteria":  ["hallway"],
-    "hallway":    ["cafeteria", "reactor", "medbay"],
-    "reactor":    ["hallway"],
-    "medbay":     ["hallway", "electrical"],
-    "electrical": ["medbay"],
+    "cafeteria":   ["hallway_a", "hallway_b"],
+    "hallway_a":   ["cafeteria", "reactor", "medbay"],
+    "hallway_b":   ["cafeteria", "weapons", "electrical"],
+    "reactor":     ["hallway_a", "storage"],
+    "medbay":      ["hallway_a", "storage"],
+    "weapons":     ["hallway_b", "nav"],
+    "electrical":  ["hallway_b", "nav"],
+    "storage":     ["reactor", "medbay"],
+    "nav":         ["weapons", "electrical"],
 }
 
 STARTING_ROOM = "cafeteria"
@@ -43,6 +52,26 @@ def handle_client(conn, addr):
 
     # await CONNECT message
     data = conn.recv(1024).decode().strip()
+
+    # Generative AI was used to understand fd inheritance issues for windows OS and change the code below
+    if data.startswith("REJOIN"):
+        parts = dict(p.split("=") for p in data.split()[1:])
+        rejoining_color = parts.get("color")
+
+        with players_lock:
+            if rejoining_color not in players:
+                conn.sendall(b"ERROR unknown color\n")
+                conn.close()
+                return
+            # swap in the fresh connection so the game loop uses the new socket
+            players[rejoining_color]["conn"] = conn
+            role = players[rejoining_color]["role"]
+
+        print(f"[server] {rejoining_color} rejoined successfully")
+        conn.sendall(f"REJOINED color={rejoining_color} role={role}\n".encode())
+        # this thread's job is done — the game loop talks to conn directly
+        return
+
     if not data.startswith("CONNECT"):
         conn.sendall(b"ERROR invalid first message\n")
         conn.close()
@@ -59,7 +88,7 @@ def handle_client(conn, addr):
             return
 
         color = random.choice(available)
-        players[color] = {"conn": conn, "role": None, "confirmed": False, "room": STARTING_ROOM}
+        players[color] = {"conn": conn, "role": None, "confirmed": False, "room": STARTING_ROOM, "alive": True}
         current_count = len(players)
 
     print(f"[server] Assigned color '{color}' to {addr}. Players: {current_count}")
@@ -120,8 +149,6 @@ def handle_client(conn, addr):
         if all(p.get("lobby_done") for p in players.values()):
             game_ready.set()
     
-
-
 
 def game_loop():
     game_ready.wait()
@@ -185,14 +212,37 @@ def game_loop():
                 else:
                     events.append(f"{color} stayed in {current}")
             else:
-                events.append(f"{color} waited in {current}")
+                events.append(f"{color} waited in {current}")        
 
+            #everyone in a room with 2 people in it gets eliminated            
+        room_counts = Counter(players[c]["room"] for c in players if players[c].get("alive", True))
+        for room, count in room_counts.items():
+            if count == 2:
+                tagged = [c for c in players if players[c]["room"] == room and players[c].get("alive", True)]
+                for c in tagged:
+                    players[c]["alive"] = False
+                    events.append(f"{c} was eliminated in {room}!")
+        alive_players = [c for c in players if players[c].get("alive", True)]
+        if len(alive_players) <= 1:
+            winner = alive_players[0] if alive_players else "nobody"
+            events.append(f"{winner} wins!")
+            result_msg = f"ROUND_RESULT round={round_num} events={';'.join(events)}\n"
+            for p in snapshot.values():
+                try: p["conn"].sendall(result_msg.encode())
+                except: pass
+            return
+        # redoing snapshot so that the status is actually updated
+        with players_lock:
+            updated_snapshot = {c: {"room": p["room"], "conn": p["conn"]}
+                for c, p in players.items()}
         # broadcast results
         events_str = ";".join(events)
         result_msg = f"ROUND_RESULT round={round_num} events={events_str}\n"
         dead = []
-        for color, p in snapshot.items():
+        for color, p in updated_snapshot.items():
             try:
+                if not players[color].get("alive", True):
+                    continue
                 p["conn"].sendall(result_msg.encode())
             except Exception as e:
                 print(f"[server] {color} disconnected during result: {e}")

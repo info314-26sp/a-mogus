@@ -1,10 +1,6 @@
 import socket
 import sys
 
-SERVER_HOST = "localhost"
-SERVER_PORT = 8080
-
-# action selection menu things 
 CREWMATE_ACTIONS = ["MOVE", "TASK", "WAIT", "EMERGENCY"] # are we still doing task? forgot what the convo ended up being
 IMPOSTER_ACTIONS  = ["MOVE", "KILL", "SABOTAGE", "VENT", "WAIT"] # remove vent? determine what sabotage does/implement it
 
@@ -16,41 +12,42 @@ def show_menu(role):
         print(f"  {i + 1}. {action}")
     print("--------------------")
 
-
 def main():
-    if len(sys.argv) < 4:
-        print("Usage: client.py <color> <role> <socket_fd>")
+    if len(sys.argv) < 5:
+        print("Usage: client.py <color> <role> <host> <port>")
         sys.exit(1)
 
+    # Generative AI was used to understand fd inheritance issues for windows OS and change the code below
     color = sys.argv[1]
-    role = sys.argv[2]
-    sock_fd = int(sys.argv[3])
+    role  = sys.argv[2]
+    host  = sys.argv[3]          
+    port  = int(sys.argv[4])     
 
     print(f"\n[client] Started as '{color}' ({role})")
 
-    sock = socket.socket(fileno=sock_fd)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.connect((host, port))
 
-    # TODO: reconnect to server here for actual game loop
-    # currently to test im just showing the player their menu so i can see if this even works
-    # sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    # sock.connect((SERVER_HOST, SERVER_PORT))
-    # reconnected, but next steps should be the following:
-        # get the game state (await STATE)
-        # tell user to pick action (differentiate between imposter and crewmate again)
-        # depending on what they choose, present followup things (e.g. if they choose to move, where are they moving to?, if we implement task, how does that work? etc.)
-        # send player responses to server
-        # wait for the round result and then maybe just close sock? idk what else cause game loop is in server
-        # ── evil game loop section  ─────
+    sock.sendall(f"REJOIN color={color}\n".encode())
+    print(f"[client] Sent: REJOIN color={color}")
+
+    ack = sock.recv(1024).decode().strip()
+    print(f"[client] Received: {ack}")
+    if not ack.startswith("REJOINED"):
+        print(f"[client] Unexpected response to REJOIN: {ack}")
+        sock.close()
+        return
+
+    # game loop — unchanged from original below this line
     while True:
         data = sock.recv(4096).decode().strip()
-
         if data.startswith("STATE"):
             parts = dict(p.split("=") for p in data.split()[1:])
             current_room = parts["room"]
             options = parts["options"].split(",")
             round_num = parts["round"]
 
-            show_map(current_room)
+            # show_map(current_room)
             print(f"Round {round_num}  |  You ({color}) are in: {current_room.upper()}\n")
             print("  0. Stay here (WAIT)")
             for i, room in enumerate(options, 1):
@@ -80,10 +77,14 @@ def main():
             for event in events_str.split(";"):
                 print(f"  {event}")
             print("───────────────────────────────────────\n")
-
+            if "wins!" in events_str:
+                print("Game over. Closing...")
+                sock.close()
+                break
         elif not data:
             print("Disconnected.")
             break
+
 
 # Helper function to display the map with the current room highlighted
 def show_map(current_room):

@@ -4,10 +4,6 @@ import sys
 import time
 import subprocess
 
-# switched the os.exec to subprocess and popen (after MUCH research...)
-# docs for reference: https://docs.python.org/3/library/subprocess.html#popen-objects
-# 
-
 def main():
     # had to look this up and use a bit of ai cause i didnt know how to make host using host IP
     # basically, host will have to find their local IP address (LOL) and then everyone uses that to hop on game
@@ -18,7 +14,6 @@ def main():
     else:
         SERVER_HOST = raw
         SERVER_PORT = 8080
-
 
     print("[launcher] Connecting to server...")
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -67,35 +62,17 @@ def main():
     print(f"[launcher] Received: {data}")
     print(f"\n{data}\n")
 
-    #removed and replaced with os.execvp which just transfers the connection over to the client
-    # sock.close()
+    sock.close()
 
-    # launch the client scripts
-    # pass color and role as commandline args so the client knows who it is
-    fd = sock.fileno()
-    os.set_inheritable(fd, True)
+    # Generative AI was used to understand fd inheritance issues for windows OS and change the code below
+    print(f"[launcher] Launching {'imposter' if role == 'imposter' else 'crewmate'} client...")
+    process = subprocess.Popen(
+        [sys.executable, "client.py", color, role, SERVER_HOST, str(SERVER_PORT)],
+        stdin=sys.stdin,
+        stdout=sys.stdout,
+        stderr=sys.stderr
+    )
+    process.wait()
 
-
-    if role == "imposter":
-        print("[launcher] Launching imposter client...")
-        process = subprocess.Popen(
-            [sys.executable, "client.py", color, role, str(fd)],
-            close_fds=False,
-            #had to use AI to debug the need for the following three lines to connect directly to terminal
-            stdin=sys.stdin,
-            stdout=sys.stdout,
-            stderr=sys.stderr
-        )
-        process.wait()
-    else:
-        print("[launcher] Launching crewmate client...")
-        process = subprocess.Popen(
-            [sys.executable, "client.py", color, role, str(fd)],
-            close_fds=False,
-            stdin=sys.stdin,
-            stdout=sys.stdout,
-            stderr=sys.stderr
-        )
-        process.wait()
 if __name__ == "__main__":
     main()

@@ -203,7 +203,7 @@ def game_loop():
                 players.pop(color, None)
 
         print(f"[server] Round {round_num} done: {events_str}")
-        time.sleep(60)  # wait 10 seconds before next round
+        time.sleep(10)  # wait 10 seconds before next round
         round_num += 1
 
 

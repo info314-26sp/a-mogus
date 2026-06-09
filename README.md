@@ -1,5 +1,159 @@
 # a-mogus - A terminal game inspired by amongus
 
+## Final documentation
+
+**1\. Brief project overview and target use-case**
+
+Our goal with this project was originally to recreate the game among us but in terminal form. Among Us is a social deduction game where players work together to complete tasks on a spaceship while one or more impostors secretly sabotage their efforts. Our terminal-based implementation brings this experience to a distributed network setting, where players connect from separate computers over a shared network. The target users are small groups of friends or students who want a lightweight, no-install game experience over a local network or internet tunnel. However as we discovered throughout the project, game development is really hard. Most of us had not previously taken a course in game development, so going trying to figure out game loops and all the network related issues was proving to be too much within the given project timeline. This made us seriously shrink down our game to just have a round based moving game.
+
+**Final architecture diagram showing all components and connections**
+
+![Final architecture diagram](img/finalarchdiagram.png)
+
+**Protocol summary (message types, flow, and key scenarios)**
+
+Message: CONNECT
+
+Description: Initiates a player's connection to the game lobby. Must be the first message sent by a client after establishing a TCP connection.Sender: Client → Server
+
+Fields: None
+
+Response:
+
+- Success: Server replies with ASSIGN containing the player's assigned color and role
+- Failure: ERROR lobby is full if all color slots are taken; ERROR invalid first message if any other message is sent first
+
+Side Effects:
+
+Server reserves a color for the connecting player and adds them to the player registry
+
+Server begins waiting for MIN_PLAYERS to connect before proceeding
+
+Example:
+
+python3 launcher.py
+
+---
+
+Message: ASSIGN
+
+Description: Sent by the server to inform a player of their assigned color and role after enough players have joined the lobby. Sender: Server → Client
+
+Fields:
+
+- color (string, required) — the unique color identifier assigned to this player (e.g. red, blue)
+- role (string, required) — either crew or imposter
+
+Response: Client is expected to reply with CONFIRMROLE
+
+Side Effects:
+
+- Exactly one player per lobby is assigned imposter; all others receive crew
+- Role assignment happens once the first thread to run detects MIN_PLAYERS connected players
+
+Example:
+
+ASSIGN color=red role=crew
+
+---
+
+Message: CONFIRMROLE
+
+Description: Sent by the client to acknowledge and confirm the color and role they were assigned. Sender: Client → Server
+
+Fields:
+
+- color (string, required) — must match the color from the preceding ASSIGN
+- role (string, required) — must match the role from the preceding ASSIGN
+
+Response:
+
+- Success: WAIT — server acknowledges and instructs the client to hold until all players confirm
+- Failure: ERROR confirmrole mismatch if either field doesn't match what the server assigned; ERROR expected CONFIRMROLE if the message format is wrong entirely
+
+Side Effects:
+
+- Marks the player as confirmed in the server's game state
+- Once all connected players have confirmed, the server proceeds to start the game
+
+Example:
+
+CONFIRMROLE color=red role=crew
+
+---
+
+Message: WAIT
+
+Description: Sent by the server after a player's role is confirmed. Tells the client to hold until all players are ready and the game is about to begin. Sender: Server → Client
+
+Fields: None
+
+Response: None expected from client. Client should then listen for the game start MSG broadcast.
+
+Side Effects: None directly — once the last player receives WAIT, the server broadcasts the start message to everyone
+
+Example:
+
+Round 2 | You (purple) are in: HALLWAY
+
+0\. Stay here (WAIT)
+
+1\. Move to cafeteria
+
+2\. Move to reactor
+
+3\. Move to medbay
+
+Your move: 0
+
+---
+
+Message: MOVE
+
+Description: Allows a player to move into an adjacent room during their turn. Sent in response to a STATE message.
+
+Sender: Client → Server
+
+Fields:
+
+- target_room (int, required) — number of room you are trying to go to
+
+Response:
+
+- Success: Player's movement is included in the next ROUND_RESULT broadcast as {color} moved to {target}
+- Failure: If the target room is not adjacent to the player's current room or doesn't exist, the move is silently rejected and ROUND_RESULT reflects {color} stayed in {current_room} instead.
+
+Side Effects:
+
+- On success, updates the player's current room in the server's game state
+- On failure, player's room is unchanged
+
+Example:
+
+Round 2 | You (purple) are in: HALLWAY
+
+0\. Stay here (WAIT)
+
+1\. Move to cafeteria
+
+2\. Move to reactor
+
+3\. Move to medbay
+
+Your move: 1
+
+**Failure/error handling approach (timeouts, duplicates, crash recovery, ordering, etc.)**
+
+Our play testing involved mimicking having users specifically input the wrong inputs to see how our game would react. From these interactions we tried to put in try/except clauses that would catch errors where they occurred rather than have an error just show up and say nothing. Additionally we tried to include text in the except block that would inform us what error was occurring and where it was occurring in the code.
+
+**Testing and validation summary (how you verified behavior)**
+
+In order to verify behavior we tried to continuously test it throughout the development. Our validation summary included the ability to connect 3 players to the game, and assign them roles (even though we don’t end up using the roles). Next we tested the round game mechanic to make sure that it was functioning correctly, and after that the move ability. We also ran into issues when we began using subprocesses.Popen() where the code would run on MacOs devices but not on a Windows computer due to the difference between how they handled sockets. Because of that, we ensured that we tested the game on both devices each time.
+
+**Short summary of changes from the initial proposal**
+
+Our initial proposal was very optimistic, and we had to reduce our goals for the game significantly. We cut out a lot of the actions that we originally intended to implement and are part of the actual among us game like sabotage, task, kill and emergency meeting. The game still initiates an imposter and crew members, but they have no meaning in the current rendition of the game. What we did implement is a map and the ability to move within the map as well as the game logic that is required for that.
+
 ## Message Types
 
 - [CONNECT](#connect)

@@ -43,6 +43,26 @@ def handle_client(conn, addr):
 
     # await CONNECT message
     data = conn.recv(1024).decode().strip()
+
+    # Generative AI was used to understand fd inheritance issues for windows OS and change the code below
+    if data.startswith("REJOIN"):
+        parts = dict(p.split("=") for p in data.split()[1:])
+        rejoining_color = parts.get("color")
+
+        with players_lock:
+            if rejoining_color not in players:
+                conn.sendall(b"ERROR unknown color\n")
+                conn.close()
+                return
+            # swap in the fresh connection so the game loop uses the new socket
+            players[rejoining_color]["conn"] = conn
+            role = players[rejoining_color]["role"]
+
+        print(f"[server] {rejoining_color} rejoined successfully")
+        conn.sendall(f"REJOINED color={rejoining_color} role={role}\n".encode())
+        # this thread's job is done — the game loop talks to conn directly
+        return
+
     if not data.startswith("CONNECT"):
         conn.sendall(b"ERROR invalid first message\n")
         conn.close()
@@ -121,8 +141,6 @@ def handle_client(conn, addr):
             game_ready.set()
     
 
-
-
 def game_loop():
     game_ready.wait()
 
@@ -185,7 +203,7 @@ def game_loop():
                 else:
                     events.append(f"{color} stayed in {current}")
             else:
-                events.append(f"{color} waited in {current}")
+                events.append(f"{color} waited in {current}")        
 
         # broadcast results
         events_str = ";".join(events)

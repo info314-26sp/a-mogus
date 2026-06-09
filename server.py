@@ -1,6 +1,7 @@
 import socket
 import threading
 import random
+import time
 
 # AI assitance used for the IP config thing so host just has to copy paste the IP instead of looking it up themselves
 hostname = socket.gethostname()
@@ -15,9 +16,26 @@ MIN_PLAYERS = 3
 # for players: color -> { "conn": ..., "role": ..., "confirmed": False }
 players = {}      
 players_lock = threading.Lock()
+game_ready = threading.Event()
 
 COLORS = ["red", "blue", "green", "yellow", "purple", "orange"]
 
+'''
+this is the current map layout bc i say so
+
+cafeteria ── hallway ── reactor
+               │
+             medbay ── electrical
+'''
+MAP = {
+    "cafeteria":  ["hallway"],
+    "hallway":    ["cafeteria", "reactor", "medbay"],
+    "reactor":    ["hallway"],
+    "medbay":     ["hallway", "electrical"],
+    "electrical": ["medbay"],
+}
+
+STARTING_ROOM = "cafeteria"
 
 def handle_client(conn, addr):
     """One thread per connected client."""
@@ -41,7 +59,7 @@ def handle_client(conn, addr):
             return
 
         color = random.choice(available)
-        players[color] = {"conn": conn, "role": None, "confirmed": False}
+        players[color] = {"conn": conn, "role": None, "confirmed": False, "room": STARTING_ROOM}
         current_count = len(players)
 
     print(f"[server] Assigned color '{color}' to {addr}. Players: {current_count}")
@@ -95,18 +113,104 @@ def handle_client(conn, addr):
             if all_confirmed:
                 break
 
-    conn.sendall(b"MSG text=All players confirmed. Game starting!\n")
-    print(f"[server] All players confirmed. Game ready!")
 
-    # TODO: start game loop (how tf...)
-        # in game loop: 
-            # define/release the game state to players
-            # start round
-            # round_end?
-            # round_result - send MSG with what eveyrone did
-            
+    # set lobby_done for this player and check if all are done
+    with players_lock:
+        players[color]["lobby_done"] = True
+        if all(p.get("lobby_done") for p in players.values()):
+            game_ready.set()
+    
+
+
+
+def game_loop():
+    game_ready.wait()
+
+    # send start message to everyone
+    with players_lock:
+        for p in players.values():
+            p["conn"].sendall(b"MSG text=All players confirmed. Game starting!\n")
+
+    time.sleep(1)  # let clients receive the start msg before round 1
+
+    round_num = 1
+    while True:
+        print(f"[server] === Round {round_num} ===")
+
+        # snapshot so we're not holding the lock during network I/O
+        with players_lock:
+            snapshot = {c: {"room": p["room"], "conn": p["conn"]}
+                        for c, p in players.items()}
+
+        # send each player their STATE with valid move options
+        for color, p in snapshot.items():
+            room = p["room"]
+            options = ",".join(MAP[room])
+            msg = f"STATE color={color} room={room} options={options} round={round_num}\n"
+            try:
+                p["conn"].sendall(msg.encode())
+            except Exception as e:
+                print(f"[server] {color} disconnected during state send: {e}")
+
+        # collect one action from each player (blocking)
+        actions = {}
+        dead = []
+        for color, p in snapshot.items():
+            try:
+                data = p["conn"].recv(1024).decode().strip()
+                actions[color] = data
+                print(f"[server] {color}: {data}")
+            except Exception as e:
+                print(f"[server] lost {color}: {e}")
+                dead.append(color)
+
+        with players_lock:
+            for color in dead:
+                players.pop(color, None)
+
+        # only process actions for still-connected players
+        actions = {c: a for c, a in actions.items() if c not in dead}
+
+        # resolve
+        events = []
+        for color, action in actions.items():
+            current = snapshot[color]["room"]
+            if action.startswith("MOVE"):
+                parts = action.split()
+                target = parts[1] if len(parts) >= 2 else ""
+                if target in MAP.get(current, []):
+                    with players_lock:
+                        players[color]["room"] = target
+                    events.append(f"{color} moved to {target}")
+                else:
+                    events.append(f"{color} stayed in {current}")
+            else:
+                events.append(f"{color} waited in {current}")
+
+        # broadcast results
+        events_str = ";".join(events)
+        result_msg = f"ROUND_RESULT round={round_num} events={events_str}\n"
+        dead = []
+        for color, p in snapshot.items():
+            try:
+                p["conn"].sendall(result_msg.encode())
+            except Exception as e:
+                print(f"[server] {color} disconnected during result: {e}")
+                dead.append(color)
+
+        with players_lock:
+            for color in dead:
+                players.pop(color, None)
+
+        print(f"[server] Round {round_num} done: {events_str}")
+        time.sleep(10)  # wait 10 seconds before next round
+        round_num += 1
+
 
 def main():
+    game_thread = threading.Thread(target=game_loop, daemon=True)
+    game_thread.start()
+
     server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server_sock.bind(("", 8080))

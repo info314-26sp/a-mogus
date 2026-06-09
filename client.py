@@ -56,6 +56,7 @@ def main():
             for i, room in enumerate(options, 1):
                 print(f"  {i}. Move to {room}")
 
+            print("Press the number corresponding to your move choice, or 0 to wait. Then press Enter.")
             choice = input("\nYour move: ").strip()
 
             if choice == "0" or not choice:
@@ -83,8 +84,6 @@ def main():
         elif not data:
             print("Disconnected.")
             break
-    show_menu(role)
-    print("\n(not implemented yet)")
 
 # Helper function to display the map with the current room highlighted
 def show_map(current_room):

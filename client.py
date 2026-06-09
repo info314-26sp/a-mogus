@@ -50,7 +50,7 @@ def main():
             options = parts["options"].split(",")
             round_num = parts["round"]
 
-            show_map(current_room)
+            # show_map(current_room)
             print(f"Round {round_num}  |  You ({color}) are in: {current_room.upper()}\n")
             print("  0. Stay here (WAIT)")
             for i, room in enumerate(options, 1):
@@ -80,7 +80,10 @@ def main():
             for event in events_str.split(";"):
                 print(f"  {event}")
             print("───────────────────────────────────────\n")
-
+            if "wins!" in events_str:
+                print("Game over. Closing...")
+                sock.close()
+                break
         elif not data:
             print("Disconnected.")
             break
